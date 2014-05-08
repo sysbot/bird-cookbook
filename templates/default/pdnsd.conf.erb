@@ -1,0 +1,86 @@
+<%# TODO move more of this into default attributes %>
+<%# TODO we should use chef's search functionality to dynamically get region authoritative DNS servers %>
+<%# TODO we could consider dynamically generating files with chef for all known region servers, and
+         uses the "source" setting to include them, so we always have a local hosts file. Maybe just for
+         critical infrastructure. %>
+global {
+  perm_cache = <%= node['pdnsd']['perm_cache'].to_i || 2048 %>;      # cache in kB
+  pid_file = /var/run/pdnsd.pid;
+  run_as = "<%= node['pdnsd']['daemon_user'] || 'pdnsd' %>";
+  server_ip = <%= node['pdnsd']['listen_ip'] || '127.0.0.1' %>;  # Listen for queries on this address
+  status_ctl = on;
+  query_method = udp_tcp;  # Use both TCP and UDP to query, as needed
+  min_ttl = 0;        # Enforce a minimum of X second TTL.  If the response TTL was lower, increase it to this
+  max_ttl = 1d;       # Clamp TTLs to a max of 1 day, anything longer and it is expired from cache early
+  timeout = 12;       # Global request timeout
+  neg_rrs_pol = auth; # Only cache a NXDOMAIN if it came from an authoritative server
+  neg_domain_pol=on;  # *DO* cache a NXDOMAIN (with a fake TTL) if the domain does not exist.
+                      # For example, you try to lookup ooyala.cm.  there is no .cm TLD, so nobody
+                      # can authoritatively say NXDOMIN.
+  par_queries=2;      # Run 2 queries in parallel (if we have 2 nameservers)
+}
+
+<% if ! node['ec2'].nil? -%>
+
+server {
+  label = "ec2";
+  ip = 172.16.0.23;
+  proxy_only = on;
+  lean_query = on;
+  timeout = 2;         # seconds
+  purge_cache = on;    # Obey TTLs
+  uptest = query;      # Send a query to test server health
+}
+
+<% elsif ! node['my_region'].nil? && node['my_region'] == 'syd1' -%>
+
+server {
+  label = "syd1";
+  ip = 10.245.226.52,10.245.226.51,10.245.226.50;
+  proxy_only = on;
+  lean_query = on;
+  timeout = 4;             # seconds
+  purge_cache = off;       # serve stale cached entries if upstream servers are down
+  uptest = query;          # Send a query to test server health
+  interval = 1m;           # do health check every minute
+  randomize_servers = on;  # On each query, pick a random set of servers to send it to
+}
+
+<% end -%>
+<% if node['pdnsd']['root_servers'] -%>
+server {
+  label = "root-servers";
+  ip = 198.41.0.4
+  ,    192.228.79.201
+  ,    192.33.4.12
+  ,    128.8.10.90
+  ,    192.203.230.10
+  ,    192.5.5.241
+  ,    192.112.36.4
+  ,    128.63.2.53
+  ,    192.36.148.17
+  ,    192.58.128.30
+  ,    193.0.14.129
+  ,    199.7.83.42
+  ,    202.12.27.33
+  ;
+  timeout = 5;
+  uptest = query;
+  interval = 30m;
+  ping_timeout = 300;
+  purge_cache = off;
+  policy = included;
+  preset = off;
+  exclude = ".syd1",".sv2",".mtv",".lon",".gdl",".nyc",".localdomain";
+}
+<% end -%>
+
+
+# Also parse /etc/hosts and serve (fake) responses from that
+source {
+  owner = localhost;
+  # serve_aliases = on;
+  file = "/etc/hosts";
+}
+
+

@@ -1,0 +1,95 @@
+log syslog { debug, trace, info, remote, warning, error, auth, fatal, bug };
+
+# TODO(wt): Change to following syntax at or after bird 1.3.9:
+#router id from "dummy0";
+router id 10.25.10.1;
+
+protocol direct {
+  interface "*";
+}
+
+protocol kernel {
+  scan time 20;
+  export all;
+  import all;
+}
+
+protocol device {
+  scan time 10;
+}
+
+filter import_OSPF {
+  if ( net = 0.0.0.0/0 ) then {
+    print "route accepted:", net;
+    accept;
+  }
+  reject;
+}
+
+filter export_OSPF {
+  if ( source = RTS_DEVICE ) then {
+    print "directly connected route accepted:", net;
+    ospf_metric2 = 1000;
+    accept;
+  }
+
+  if ( source = RTS_STATIC_DEVICE ) then {
+    print "static route accepted:", net;
+    ospf_metric2 = 1000;
+    accept;
+  }
+
+  reject;
+}
+
+## BGP
+protocol bgp {
+        local as 65019;                      # Use a private AS number
+        neighbor 10.101.3.13 as 65022;    # Our neighbor ...
+        #multihop;                            # ... which is connected indirectly
+        export filter {                      # We use non-trivial export rules
+                if ( net = 10.101.4.0/25 ) then { # Export only static routes
+                        # Assign our community
+                        #bgp_community.add((65019));
+                        # Artificially increase path length
+                        # by advertising local AS number twice
+                        #if bgp_path ~ [= 65019 =] then
+                        #        bgp_path.prepend(65019);
+                        print "route", net;
+                        accept;
+                }
+                reject;
+        };
+        import all;
+}
+
+protocol ospf {
+  import filter import_OSPF;
+  export filter export_OSPF;
+  ecmp 4;
+
+  area 0 {
+    interface "eth0", "eth1" {
+      cost 100;
+      # TODO(bao): Use ptp config instead of broadcast.
+      # Ubuntu 12.04 does not contain a version of bird that has the
+      # "ptp netmask" directive. This will likely be addressed in Ubuntu
+      # Ubuntu's new LTS release (presumably 13.10).
+      # fix likely in next lts release of ubuntu 
+      #type pointopoint;
+      # ptp netmask;
+
+      type broadcast;
+      hello 10; retransmit 5; wait 20; dead 40;
+    };
+
+    interface "dummy0" {
+      stub;
+    };
+  };
+}
+
+<% end %>
+<% node[:bind][:included_files].each do |file| -%>
+include "<%= "/etc/bird.d/#{file}.conf" %>";
+<% end -%>

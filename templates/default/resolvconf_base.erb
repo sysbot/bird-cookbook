@@ -1,0 +1,10 @@
+# Managed by Chef
+<% if ! node['ec2'].nil? -%>
+nameserver 172.16.0.23
+<% elsif ! node['my_region'].nil? && node['my_region'] == 'syd1' -%>
+nameserver 10.245.226.50
+nameserver 10.245.226.51
+nameserver 10.245.226.52
+<% else -%>
+nameserver 127.0.0.1
+<% end -%>
